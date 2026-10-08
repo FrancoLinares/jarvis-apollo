@@ -1,0 +1,29 @@
+# Configuración local (la plantilla es el .example; los secretos van al Llavero)
+jarvis.env
+server/config.env
+.env
+*.env
+!*.env.example
+.dev.vars
+oauth-client.json
+tokens.json
+
+# Árboles armados por server/apply.sh y scripts/deploy-server.sh
+.cache/
+
+# Firmware: lo compilado lleva el secreto de la placa adentro
+build/
+sdkconfig
+sdkconfig.old
+*.elf
+xiaozhi.bin
+firmware-backups/
+
+# Audio de pruebas del simulador
+*.wav
+*.pcm
+
+# macOS / editores
+.DS_Store
+._*
+node_modules/

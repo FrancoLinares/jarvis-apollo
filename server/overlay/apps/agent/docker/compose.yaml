@@ -1,0 +1,41 @@
+# Self-hosted Apollo: one persistent container, one volume for everything the
+# agent remembers (SQLite databases and the blob directory). Secrets ride the
+# same .dev.vars file wrangler dev uses.
+services:
+  apollo:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - '8799:8799'
+    # Los logs van al volumen ademas de a stdout: `up --build` RECREA el
+    # contenedor y `docker logs` se pierde entero. Ya paso dos veces perder la
+    # evidencia justo del turno que se estaba diagnosticando.
+    # `exec` deja a bun como PID 1, asi que SIGTERM le llega a el y el apagado
+    # sigue siendo ordenado; tee cuelga de una sustitucion de proceso. Con
+    # `sh -c "... | tee"` el PID 1 era sh, que no reenvia señales.
+    command:
+      - bash
+      - -c
+      - exec bun src/host/main.ts > >(tee -a /data/apollo.log) 2>&1
+    env_file:
+      - ../.dev.vars
+    environment:
+      APOLLO_DATA_DIRECTORY: /data
+    volumes:
+      - apollo-data:/data
+      - ${HOME}/piper:/piper:ro
+    # jarvis-speaker (deploy/pi/speaker) corre en el host y es el dueño del
+    # jack de la Pi: Apollo le manda la voz por HTTP.
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    restart: unless-stopped
+    networks: [default, jarvis-mcp]
+
+networks:
+  jarvis-mcp:
+    name: jarvis-mcp
+    external: true
+
+volumes:
+  apollo-data:

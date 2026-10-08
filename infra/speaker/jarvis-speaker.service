@@ -1,0 +1,21 @@
+[Unit]
+Description=Jarvis speaker: mezcla Spotify y la voz de Jarvis en el jack de la Pi
+After=sound.target network.target
+Before=raspotify.service
+
+[Service]
+# Cambiá por tu usuario de la Pi (debe estar en el grupo audio).
+User=pi
+ExecStart=/usr/bin/python3 /opt/jarvis-speaker/speaker.py
+# El FIFO de la música vive acá. Preserve: si este servicio se reinicia,
+# raspotify no pierde el pipe.
+RuntimeDirectory=jarvis-speaker
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+StateDirectory=jarvis-speaker
+Restart=always
+RestartSec=2
+Nice=-5
+
+[Install]
+WantedBy=multi-user.target

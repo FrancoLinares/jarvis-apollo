@@ -1,0 +1,15 @@
+{
+    "manufacturer": "waveshare",
+    "type": "esp32-s3-touch-lcd-4.3c",
+    "target": "esp32s3",
+    "builds": [
+        {
+            "name": "esp32-s3-touch-lcd-4.3c",
+            "sdkconfig_append": [
+                "CONFIG_USE_EMOTE_MESSAGE_STYLE=y",
+                "CONFIG_MMAP_FILE_NAME_LENGTH=32",
+                "CONFIG_FLASH_EXPRESSION_ASSETS=y"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,118 @@
+#ifndef PROTOCOL_H
+#define PROTOCOL_H
+
+#include <cJSON.h>
+#include <chrono>
+#include <functional>
+#include <string>
+#include <vector>
+
+struct AudioStreamPacket {
+    int sample_rate = 0;
+    int frame_duration = 0;
+    uint32_t timestamp = 0;
+    std::vector<uint8_t> payload;
+    // Apollo streams TTS as headerless PCM, but local sound effects are still
+    // Opus packets from the ogg demuxer. The decode queue carries both, so the
+    // payload kind has to travel with the packet, not with a build flag.
+    bool pcm = false;
+};
+
+struct BinaryProtocol2 {
+    uint16_t version;
+    uint16_t type;          // Message type (0: OPUS, 1: JSON)
+    uint32_t reserved;      // Reserved for future use
+    uint32_t timestamp;     // Timestamp in milliseconds (used for server-side AEC)
+    uint32_t payload_size;  // Payload size in bytes
+    uint8_t payload[];      // Payload data
+} __attribute__((packed));
+
+struct BinaryProtocol3 {
+    uint8_t type;
+    uint8_t reserved;
+    uint16_t payload_size;
+    uint8_t payload[];
+} __attribute__((packed));
+
+enum AbortReason { kAbortReasonNone, kAbortReasonWakeWordDetected };
+
+struct DeviceTelemetry {
+    int battery_level = 0;
+    bool battery_valid = false;
+    bool charging = false;
+    bool charging_valid = false;
+    int volume = 0;
+    int wifi_rssi = 0;
+    const char* firmware_version = nullptr;
+};
+
+enum ListeningMode {
+    kListeningModeAutoStop,
+    kListeningModeManualStop,
+    kListeningModeRealtime  // 需要 AEC 支持
+};
+
+class Protocol {
+public:
+    virtual ~Protocol() = default;
+
+    inline int server_sample_rate() const { return server_sample_rate_; }
+    inline int server_frame_duration() const { return server_frame_duration_; }
+    inline const std::string& session_id() const { return session_id_; }
+
+    void OnIncomingAudio(std::function<void(std::unique_ptr<AudioStreamPacket> packet)> callback);
+    void OnIncomingJson(std::function<void(const cJSON* root)> callback);
+    void OnAudioChannelOpened(std::function<void()> callback);
+    void OnAudioChannelClosed(std::function<void()> callback);
+    void OnNetworkError(std::function<void(const std::string& message)> callback);
+    void OnConnected(std::function<void()> callback);
+    void OnDisconnected(std::function<void()> callback);
+
+    virtual bool Start() = 0;
+    virtual bool OpenAudioChannel() = 0;
+    virtual void CloseAudioChannel(bool send_goodbye = true) = 0;
+    virtual bool IsAudioChannelOpened() const = 0;
+    virtual bool SendAudio(std::unique_ptr<AudioStreamPacket> packet) = 0;
+    virtual void SendWakeWordDetected(const std::string& wake_word);
+    virtual void SendStartListening(ListeningMode mode);
+    virtual void SendStopListening();
+    virtual void SendAbortSpeaking(AbortReason reason);
+    virtual void SendMcpMessage(const std::string& message);
+    // Touch gestures have no xiaozhi equivalent, so this is a no-op unless the
+    // protocol in use understands them.
+    virtual void SendGesture(const std::string& gesture) { (void)gesture; }
+    // Same story as gestures: only Apollo has a telemetry message.
+    virtual void SendTelemetry(const DeviceTelemetry& telemetry) { (void)telemetry; }
+
+    virtual void SendPlaybackAck(uint32_t played_milliseconds) { (void)played_milliseconds; }
+    // And only Apollo asks for confirmations.
+    virtual void SendConfirm(bool ok) { (void)ok; }
+    // Cancels an open listen session without committing the audio as a turn.
+    virtual void SendListenCancel() {}
+
+protected:
+    std::function<void(const cJSON* root)> on_incoming_json_;
+    std::function<void(std::unique_ptr<AudioStreamPacket> packet)> on_incoming_audio_;
+    std::function<void()> on_audio_channel_opened_;
+    std::function<void()> on_audio_channel_closed_;
+    std::function<void(const std::string& message)> on_network_error_;
+    std::function<void()> on_connected_;
+    std::function<void()> on_disconnected_;
+
+    int server_sample_rate_ = 24000;
+    int server_frame_duration_ = 60;
+    bool error_occurred_ = false;
+    std::string session_id_;
+    std::chrono::time_point<std::chrono::steady_clock> last_incoming_time_;
+
+    virtual bool SendText(const std::string& text) = 0;
+public:
+    // JSON ya armado (p. ej. el boot_report de Jarvis).
+    bool SendJsonMessage(const std::string& json) { return SendText(json); }
+protected:
+    virtual void SetError(const std::string& message);
+    virtual bool IsTimeout() const;
+    static void AddTextFontCapabilities(cJSON* root);
+};
+
+#endif  // PROTOCOL_H

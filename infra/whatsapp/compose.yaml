@@ -1,0 +1,43 @@
+# WAHA: WhatsApp HTTP API self-hosted, para que Jarvis mande avisos por WhatsApp.
+#
+# - Motor GOWS (Go, whatsmeow), sin Chromium: entra en la Pi (2 GB de RAM).
+#   Hasta el 2026-10-05 era NOWEB (Baileys), pero se le rompió el cifrado con
+#   WhatsApp ("failed to decrypt", "timed out waiting for message") y los avisos
+#   quedaban en ack=0 sin salir nunca. GOWS viene en la misma imagen.
+# - Se vincula como un dispositivo más de tu cuenta (como WhatsApp Web),
+#   escaneando un QR una sola vez. La sesión queda en el volumen.
+# - El puerto se publica SOLO en 127.0.0.1 de la Pi: Apollo lo ve por la red de
+#   Docker (http://waha:3000) y el QR se baja por ssh. Nada queda expuesto a la LAN.
+#
+# Levantar (en la Pi):  cd ~/whatsapp && docker compose up -d
+# Secretos en ~/whatsapp/.env (permisos 600): WAHA_API_KEY, WAHA_DASHBOARD_PASSWORD.
+# No se escribe a mano: lo genera `scripts/push-secrets.sh whatsapp` desde el
+# Llavero, y la misma WAHA_API_KEY va al .dev.vars de Apollo.
+services:
+  waha:
+    image: devlikeapro/waha:noweb-arm
+    container_name: waha
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      WHATSAPP_DEFAULT_ENGINE: GOWS
+      WAHA_DASHBOARD_USERNAME: jarvis
+      # Sin esto NOWEB no guarda los chats en memoria; no hace falta para mandar.
+      WAHA_PRINT_QR: 'False'
+      WAHA_LOG_LEVEL: warn
+    ports:
+      - '127.0.0.1:3000:3000'
+    volumes:
+      - waha-sessions:/app/.sessions
+    # El tope evita que un leak tumbe la Pi.
+    mem_limit: 400m
+    networks: [jarvis-mcp]
+
+networks:
+  jarvis-mcp:
+    name: jarvis-mcp
+    external: true
+
+volumes:
+  waha-sessions:

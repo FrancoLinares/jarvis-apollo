@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Frena el commit si lo que está en stage tiene un secreto (valor del Llavero o
+# patrón de key conocido). Se activa una vez con:
+#   git config core.hooksPath .githooks
+exec python3 -I "$(git rev-parse --show-toplevel)/scripts/check-leaks.py" --staged

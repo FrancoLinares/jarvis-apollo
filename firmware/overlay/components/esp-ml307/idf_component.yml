@@ -1,0 +1,22 @@
+dependencies:
+  78/uart-uhci:
+    rules:
+    - if: target not in [esp32]
+    version: ^0.3.2
+  espressif/mqtt:
+    matches:
+    - if: idf_version >=6.0
+    version: ^1.0.0
+  idf: '>=5.5.2'
+description: ESP32 ML307 / EC801E / NT26K Cat.1 Cellular Module
+files:
+  exclude:
+  - .git
+  - dist
+license: Apache-2.0
+repository: git://github.com/78/esp-ml307.git
+repository_info:
+  commit_sha: 9f2a278ac6bf4ca3d6bc5057e8fcf10097cc583f
+  path: .
+url: https://github.com/78/esp-ml307
+version: 3.6.6

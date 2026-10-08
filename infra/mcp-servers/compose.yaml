@@ -1,0 +1,130 @@
+# DIAGNOSTICADO (2026-09-07): estos contenedores se reiniciaban solos cientos de
+# veces por dia. No era la red ni Google: era supergateway 3.4.3 en modo sse.
+# Su gateway stdio->SSE guarda UN solo objeto Server y le hace connect() en cada
+# conexion nueva, sin close() al desconectarse el cliente. La SEGUNDA conexion
+# tira "Already connected to a transport" y mata el proceso de Node.
+#
+# Verificado con un experimento: con `curl -N http://127.0.0.1:8010/sse` alcanzaba
+# UNA conexion extra para que el RestartCount subiera. Ya en streamableHttp,
+# cinco conexiones concurrentes lo dejaron en cero.
+#
+# Consecuencia visible: cada reinicio invalidaba la sesion, y las llamadas de
+# Apollo devolvian "HTTP 503: No active SSE connection for session <id>". Jarvis
+# lo contaba como "los mapas estan caidos" o "se me cayo la conexion con el
+# calendario". Afectaba a los tres servidores por igual.
+#
+# 3.4.3 es la ultima version publicada, asi que no hay upgrade que lo arregle.
+# La salida es --outputTransport streamableHttp sin --stateful: arma el server
+# por request y no comparte ese estado.
+
+# Servidores MCP para Jarvis.
+#
+# Apollo instala MCPs por URL HTTP, pero los servidores de Google son stdio.
+# supergateway hace de puente: levanta el server stdio y lo expone por SSE.
+#
+# Todos viven en la red 'jarvis-mcp', compartida con el contenedor de Apollo,
+# así se alcanzan por nombre de servicio y el tráfico nunca sale del host.
+services:
+  maps-mcp:
+    image: node:22-alpine
+    container_name: maps-mcp
+    restart: unless-stopped
+    env_file: [.env]
+    # --outputTransport sse expone /sse (suscripción) y /message (envío).
+    # streamableHttp en vez de sse: en modo SSE supergateway 3.4.3 mantiene UN
+    # solo objeto Server y le hace connect() en cada conexion nueva, asi que la
+    # SEGUNDA conexion mata el proceso con "Already connected to a transport".
+    # Verificado: abrir una sola conexion extra con curl subia el RestartCount.
+    # streamableHttp sin --stateful arma el server por request y no tiene ese
+    # estado compartido.
+    #
+    # La ruta sigue siendo /sse a proposito: Apollo tiene guardada la URL
+    # http://maps-mcp:8000/sse y su server_id sale de ahi. Cambiarla crearia un
+    # servidor nuevo, renombraria todas las tools (mcp_<serverId>_...) y dejaria
+    # huerfanas las 49 filas de mcp_tool_settings.
+    command: >
+      npx -y supergateway
+      --stdio "npx -y @modelcontextprotocol/server-google-maps"
+      --outputTransport streamableHttp
+      --port 8000
+      --streamableHttpPath /sse
+      --healthEndpoint /health
+    expose: ["8000"]
+    ports:
+      # Publicado en loopback del host para poder probarlo con curl desde la Pi
+      # sin exponerlo al resto de la red.
+      - "127.0.0.1:8010:8000"
+    volumes:
+      - mcp-npm-cache:/root/.npm
+    networks: [jarvis-mcp]
+
+  # Google Calendar. El token OAuth se generó con `... auth` y vive en
+  # google/tokens/; el cliente OAuth es de tipo Desktop app.
+  calendar-mcp:
+    image: node:22-alpine
+    container_name: calendar-mcp
+    restart: unless-stopped
+    environment:
+      GOOGLE_OAUTH_CREDENTIALS: /creds/oauth-client.json
+      GOOGLE_CALENDAR_MCP_TOKEN_PATH: /tokens/tokens.json
+    volumes:
+      - mcp-npm-cache:/root/.npm
+      - ${HOME}/mcp-servers/google/oauth-client.json:/creds/oauth-client.json:ro
+      - ${HOME}/mcp-servers/google/tokens:/tokens
+    # Mismo cambio y mismo motivo que en maps-mcp: en modo sse la segunda
+    # conexion mata el proceso ("Already connected to a transport"). La ruta
+    # queda en /sse para no cambiar la URL que Apollo tiene registrada, de la
+    # que sale el server_id que namespacea todas las tools.
+    # 2026-09-28: sin supergateway. En modo stateless supergateway levantaba
+    # "npx @cocal/google-calendar-mcp" de cero en CADA pedido: 13-18 s por
+    # consulta, y el primer discovery de Apollo vencia a los 15 s. El server
+    # habla HTTP nativo (--transport http): 0,5-0,65 s por list-events y 5
+    # conexiones concurrentes sin reinicios (medido). Responde en cualquier
+    # ruta, asi que /sse (la URL registrada en Apollo) sigue valiendo.
+    command: >
+      npx -y @cocal/google-calendar-mcp start
+      --transport http
+      --port 8000
+      --host 0.0.0.0
+    expose: ["8000"]
+    ports:
+      - "127.0.0.1:8011:8000"
+    networks: [jarvis-mcp]
+
+  # Notion. NO usa OAuth: el MCP alojado de Notion (mcp.notion.com) exige que el
+  # redirect del registro dinámico sea HTTPS, y Apollo vive en la LAN por HTTP,
+  # así que rechazaba el alta con "Redirect URI must use HTTPS". Con el servidor
+  # oficial corriendo local y un token de integración interna no hay OAuth, y el
+  # token no vence.
+  notion-mcp:
+    image: node:22-alpine
+    container_name: notion-mcp
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      # El paquete lee la cabecera de autorización de acá.
+      OPENAPI_MCP_HEADERS: '{"Authorization":"Bearer ${NOTION_TOKEN}","Notion-Version":"2022-06-28"}'
+    # Mismo cambio y mismo motivo que en maps-mcp: en modo sse la segunda
+    # conexion mata el proceso ("Already connected to a transport"). La ruta
+    # queda en /sse para no cambiar la URL que Apollo tiene registrada, de la
+    # que sale el server_id que namespacea todas las tools.
+    command: >
+      npx -y supergateway
+      --stdio "npx -y @notionhq/notion-mcp-server"
+      --outputTransport streamableHttp
+      --port 8000
+      --streamableHttpPath /sse
+      --healthEndpoint /health
+    expose: ["8000"]
+    ports:
+      - "127.0.0.1:8012:8000"
+    volumes:
+      - mcp-npm-cache:/root/.npm
+    networks: [jarvis-mcp]
+
+volumes:
+  mcp-npm-cache:
+
+networks:
+  jarvis-mcp:
+    name: jarvis-mcp
